@@ -1,7 +1,8 @@
-from http.server import BaseHTTPRequestHandler
 import json
 from pathlib import Path
-from urllib.parse import urlparse
+from flask import Flask, jsonify, request, Response
+
+app = Flask(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BUNDLE_PATH = PROJECT_ROOT / "models" / "vercel_bundle.json"
@@ -687,49 +688,28 @@ HTML_PAGE = r"""<!DOCTYPE html>
 """
 
 
-class handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        parsed = urlparse(self.path)
-        if parsed.path == "/api/bundle":
-            bundle = get_bundle()
-            payload = {
-                "historical": bundle["historical"],
-                "model_comparison": bundle["model_comparison"]
-            }
-            body = json.dumps(payload).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
+@app.route("/", methods=["GET"])
+def home():
+    return Response(HTML_PAGE, mimetype="text/html; charset=utf-8")
 
-        body = HTML_PAGE.encode("utf-8")
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
 
-    def do_POST(self):
-        parsed = urlparse(self.path)
-        if parsed.path == "/api/predict":
-            length = int(self.headers.get("Content-Length", 0))
-            raw = self.rfile.read(length) if length > 0 else b"{}"
-            data = json.loads(raw.decode("utf-8"))
-            values = [float(x) for x in data.get("values", [0]*10)]
-            pred, probs = predict_from_trees(values)
-            body = json.dumps({
-                "prediction": pred,
-                "probabilities": probs
-            }).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
+@app.route("/api/bundle", methods=["GET"])
+def api_bundle():
+    bundle = get_bundle()
+    return jsonify({
+        "historical": bundle["historical"],
+        "model_comparison": bundle["model_comparison"]
+    })
 
-        self.send_response(404)
-        self.end_headers()
+
+@app.route("/api/predict", methods=["POST"])
+def api_predict():
+    data = request.get_json(silent=True) or {}
+    values = [float(x) for x in data.get("values", [0] * 10)]
+    pred, probs = predict_from_trees(values)
+    return jsonify({
+        "prediction": pred,
+        "probabilities": probs
+    })
+
 
