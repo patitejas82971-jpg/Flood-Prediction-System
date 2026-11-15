@@ -732,3 +732,4 @@ class handler(BaseHTTPRequestHandler):
 
         self.send_response(404)
         self.end_headers()
+

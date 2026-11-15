@@ -16,6 +16,8 @@ A Data Science & Machine Learning web dashboard for estimating flood-risk levels
 
 ## 📁 Project Structure
 ```text
+├── api/
+│   └── index.py                # Vercel serverless web app & prediction API
 ├── app/
 │   └── app.py                  # Streamlit web dashboard
 ├── data/
@@ -24,7 +26,8 @@ A Data Science & Machine Learning web dashboard for estimating flood-risk levels
 ├── models/
 │   ├── flood_model.pkl         # Trained Random Forest classifier
 │   ├── features.pkl            # Model feature list
-│   └── model_comparison.csv    # Evaluation metrics across models
+│   ├── model_comparison.csv    # Evaluation metrics across models
+│   └── vercel_bundle.json      # Compact exported model & dataset bundle for Vercel
 ├── notebooks/
 │   ├── data_collection.py      # 01 - Open-Meteo historical data download
 │   ├── data_cleaning.py        # 02 - Data cleaning & interpolation
@@ -34,14 +37,16 @@ A Data Science & Machine Learning web dashboard for estimating flood-risk levels
 ├── src/
 │   ├── preprocessing.py        # Reusable data cleaning & feature helpers
 │   └── prediction.py           # Model loading & inference helpers
-└── requirements.txt            # Python dependencies
+├── vercel.json                 # Vercel routing configuration
+├── requirements.txt            # Lightweight dependencies for Vercel
+└── requirements-streamlit.txt  # Full local dependencies for Streamlit & ML pipeline
 ```
 
-## 🚀 How to Run
+## 🚀 How to Run Locally (Streamlit)
 
 1. **Install dependencies:**
    ```bash
-   pip install -r requirements.txt
+   pip install -r requirements-streamlit.txt
    ```
 
 2. **Launch the Streamlit dashboard:**
@@ -56,4 +61,7 @@ A Data Science & Machine Learning web dashboard for estimating flood-risk levels
    python notebooks/feature_engineering.py
    python notebooks/model_training.py
    ```
+
+## ☁️ Deploying on Vercel
+This repository includes `vercel.json`, `api/index.py`, and `models/vercel_bundle.json` for direct serverless deployment on [Vercel](https://vercel.com/new). Simply import the repository on Vercel and click **Deploy**.
 
