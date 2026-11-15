@@ -1,0 +1,10 @@
+venv/
+.venv/
+app/
+src/
+notebooks/
+data/
+*.py
+*.pkl
+*.zip
+requirements.txt
