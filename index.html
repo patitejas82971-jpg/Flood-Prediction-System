@@ -1,71 +1,4 @@
-import json
-from pathlib import Path
-from flask import Flask, jsonify, request, Response
-
-app = Flask(__name__)
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-BUNDLE_PATH = PROJECT_ROOT / "models" / "vercel_bundle.json"
-
-_BUNDLE_CACHE = None
-
-
-def get_bundle():
-    global _BUNDLE_CACHE
-    if _BUNDLE_CACHE is None:
-        with open(BUNDLE_PATH, "r", encoding="utf-8") as f:
-            _BUNDLE_CACHE = json.load(f)
-    return _BUNDLE_CACHE
-
-
-def predict_from_trees(values):
-    bundle = get_bundle()
-    trees = bundle["trees"]
-    classes = bundle["classes"]
-    n_classes = len(classes)
-
-    avg_probs = [0.0] * n_classes
-    for tree in trees:
-        left = tree["left"]
-        right = tree["right"]
-        feat = tree["feature"]
-        thresh = tree["threshold"]
-        val = tree["value"]
-
-        node = 0
-        while left[node] != -1:
-            f_idx = feat[node]
-            if values[f_idx] <= thresh[node]:
-                node = left[node]
-            else:
-                node = right[node]
-        node_probs = val[node]
-        for c_idx in range(n_classes):
-            avg_probs[c_idx] += node_probs[c_idx]
-
-    n_trees = float(len(trees)) if trees else 1.0
-    avg_probs = [p / n_trees for p in avg_probs]
-
-    # Map to 3 classes [Low (0), Medium (1), High (2)]
-    prob_3 = [0.0, 0.0, 0.0]
-    for idx, cls_val in enumerate(classes):
-        if 0 <= cls_val <= 2:
-            prob_3[cls_val] = avg_probs[idx]
-
-    # Check high-risk threshold rule from feature_engineering.py if training split lacked class 2
-    rain_3d = values[1]
-    rain_7d = values[2]
-    if 2 not in classes and (rain_7d >= 250.0 or rain_3d >= 150.0):
-        high_p = min(0.92, max(0.65, prob_3[1]))
-        med_p = round((1.0 - high_p) * 0.7, 4)
-        low_p = round(max(0.0, 1.0 - high_p - med_p), 4)
-        prob_3 = [low_p, med_p, high_p]
-
-    pred_class = int( max(range(3), key=lambda i: prob_3[i]) )
-    return pred_class, [round(p * 100.0, 2) for p in prob_3]
-
-
-HTML_PAGE = r"""<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -400,6 +333,59 @@ HTML_PAGE = r"""<!DOCTYPE html>
     let mapMarker = null;
     let probChartInstance = null;
     let citySearchResults = [];
+    let modelBundle = null;
+
+    function predictFromBundle(values) {
+      if (!modelBundle) return { prediction: 0, probabilities: [100, 0, 0] };
+      const trees = modelBundle.trees;
+      const classes = modelBundle.classes;
+      const nClasses = classes.length;
+      const avgProbs = new Array(nClasses).fill(0.0);
+
+      for (const tree of trees) {
+        const left = tree.left;
+        const right = tree.right;
+        const feat = tree.feature;
+        const thresh = tree.threshold;
+        const val = tree.value;
+        let node = 0;
+        while (left[node] !== -1) {
+          const fIdx = feat[node];
+          node = values[fIdx] <= thresh[node] ? left[node] : right[node];
+        }
+        const nodeProbs = val[node];
+        for (let c = 0; c < nClasses; c++) {
+          avgProbs[c] += nodeProbs[c];
+        }
+      }
+
+      const nTrees = trees.length || 1;
+      for (let c = 0; c < nClasses; c++) avgProbs[c] /= nTrees;
+
+      let prob3 = [0.0, 0.0, 0.0];
+      for (let idx = 0; idx < nClasses; idx++) {
+        const clsVal = classes[idx];
+        if (clsVal >= 0 && clsVal <= 2) prob3[clsVal] = avgProbs[idx];
+      }
+
+      const rain3d = values[1];
+      const rain7d = values[2];
+      if (!classes.includes(2) && (rain7d >= 250.0 || rain3d >= 150.0)) {
+        const highP = Math.min(0.92, Math.max(0.65, prob3[1]));
+        const medP = Number(((1.0 - highP) * 0.7).toFixed(4));
+        const lowP = Number(Math.max(0.0, 1.0 - highP - medP).toFixed(4));
+        prob3 = [lowP, medP, highP];
+      }
+
+      let predClass = 0;
+      if (prob3[1] > prob3[predClass]) predClass = 1;
+      if (prob3[2] > prob3[predClass]) predClass = 2;
+
+      return {
+        prediction: predClass,
+        probabilities: prob3.map(p => Number((p * 100.0).toFixed(2)))
+      };
+    }
 
     function switchLocMode(mode) {
       document.getElementById("mode-ap").style.display = mode === "ap" ? "block" : "none";
@@ -456,7 +442,6 @@ HTML_PAGE = r"""<!DOCTYPE html>
         document.getElementById("in_month").value = monthVal;
         document.getElementById("month_val").innerText = monthVal;
 
-        // Render Live Location Map & Table
         document.getElementById("live-loc-section").style.display = "block";
         const locTitle = [locInfo.name, locInfo.region, locInfo.country].filter(Boolean).join(", ");
         document.getElementById("live-loc-title").innerText = `📍 Live Location: ${locTitle}`;
@@ -484,7 +469,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         }
 
         setStatus(`Loaded live weather for <strong>${locInfo.name}, ${locInfo.region || "India"}</strong> (${locInfo.latitude.toFixed(4)}°N, ${locInfo.longitude.toFixed(4)}°E)`);
-        await runPrediction();
+        runPrediction();
       } catch (err) {
         setStatus("Weather fetch error: " + err.message, true);
       }
@@ -557,7 +542,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       });
     }
 
-    async function runPrediction() {
+    function runPrediction() {
       const values = [
         Number(document.getElementById("in_rain").value),
         Number(document.getElementById("in_rain3").value),
@@ -571,12 +556,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         Number(document.getElementById("in_month").value)
       ];
 
-      const resp = await fetch("/api/predict", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ values })
-      });
-      const res = await resp.json();
+      const res = predictFromBundle(values);
 
       document.getElementById("initial-banner").style.display = "none";
       document.getElementById("prediction-section").style.display = "block";
@@ -642,9 +622,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
 
     async function loadDashboardBundle() {
-      const resp = await fetch("/api/bundle");
-      const data = await resp.json();
-      const hist = data.historical;
+      const resp = await fetch("/models/vercel_bundle.json");
+      modelBundle = await resp.json();
+      const hist = modelBundle.historical;
 
       document.getElementById("st_avg").innerText = `${hist.stats.avg.toFixed(2)} mm`;
       document.getElementById("st_max").innerText = `${hist.stats.max.toFixed(2)} mm`;
@@ -670,7 +650,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       });
 
       const compBody = document.getElementById("model-comp-tbody");
-      compBody.innerHTML = (data.model_comparison || []).map(r => `
+      compBody.innerHTML = (modelBundle.model_comparison || []).map(r => `
         <tr>
           <td>${r.Model}</td>
           <td>${(r.Accuracy * 100).toFixed(2)}%</td>
@@ -685,31 +665,3 @@ HTML_PAGE = r"""<!DOCTYPE html>
   </script>
 </body>
 </html>
-"""
-
-
-@app.route("/", methods=["GET"])
-def home():
-    return Response(HTML_PAGE, mimetype="text/html; charset=utf-8")
-
-
-@app.route("/api/bundle", methods=["GET"])
-def api_bundle():
-    bundle = get_bundle()
-    return jsonify({
-        "historical": bundle["historical"],
-        "model_comparison": bundle["model_comparison"]
-    })
-
-
-@app.route("/api/predict", methods=["POST"])
-def api_predict():
-    data = request.get_json(silent=True) or {}
-    values = [float(x) for x in data.get("values", [0] * 10)]
-    pred, probs = predict_from_trees(values)
-    return jsonify({
-        "prediction": pred,
-        "probabilities": probs
-    })
-
-
